@@ -1,0 +1,44 @@
+services:
+  testlink:
+    build: .
+    container_name: testlink-app
+    ports:
+      - "8080:80"
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-testlink}
+      - POSTGRES_USER=${POSTGRES_USER:-testlink}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-testlink123}
+    volumes:
+      - testlink_app_data:/var/www/html
+      - testlink_uploads:/var/testlink/upload_area
+      - testlink_logs:/var/testlink/logs
+      - testlink_config:/usr/share/nginx/testlink/custom_config
+    networks:
+      - testlink-network
+    restart: unless-stopped
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:13
+    container_name: testlink-postgres
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-testlink}
+      - POSTGRES_USER=${POSTGRES_USER:-testlink}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-testlink123}
+    volumes:
+      - testlink_db_data:/var/lib/postgresql/data
+    networks:
+      - testlink-network
+    restart: unless-stopped
+
+volumes:
+  testlink_db_data:
+  testlink_app_data:
+  testlink_uploads:
+  testlink_logs:
+  testlink_config:
+
+networks:
+  testlink-network:
+    driver: bridge
