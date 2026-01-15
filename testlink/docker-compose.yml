@@ -1,36 +1,32 @@
+version: '2'
 services:
+  mariadb:
+    image: mariadb:10.6
+    container_name: testlink-mariadb
+    environment:
+      - MYSQL_ROOT_PASSWORD=admin
+      - MYSQL_DATABASE=testlink
+      - MYSQL_USER=testlink
+      - MYSQL_PASSWORD=testlink
+    volumes:
+      - 'testlink_db_data:/var/lib/mysql'
+    networks:
+      - testlink-network
+
   testlink:
     build: .
     container_name: testlink-app
     ports:
-      - "8080:80"
+      - '8080:80'
     environment:
-      - POSTGRES_DB=${POSTGRES_DB:-testlink}
-      - POSTGRES_USER=${POSTGRES_USER:-testlink}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-testlink123}
-    volumes:
-      - testlink_app_data:/var/www/html
-      - testlink_uploads:/var/testlink/upload_area
-      - testlink_logs:/var/testlink/logs
-      - testlink_config:/usr/share/nginx/testlink/custom_config
-    networks:
-      - testlink-network
-    restart: unless-stopped
+      - DB_HOST=mariadb
+      - DB_USER=testlink
+      - DB_PASS=testlink
+      - DB_NAME=testlink
     depends_on:
-      - postgres
-
-  postgres:
-    image: postgres:13
-    container_name: testlink-postgres
-    environment:
-      - POSTGRES_DB=${POSTGRES_DB:-testlink}
-      - POSTGRES_USER=${POSTGRES_USER:-testlink}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-testlink123}
-    volumes:
-      - testlink_db_data:/var/lib/postgresql/data
+      - mariadb
     networks:
       - testlink-network
-    restart: unless-stopped
 
 volumes:
   testlink_db_data:
