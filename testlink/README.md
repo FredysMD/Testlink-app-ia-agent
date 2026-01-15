@@ -3,12 +3,12 @@
 ## 🚀 Inicio Rápido
 
 ```bash
-# Levantar TestLink + PostgreSQL
+# Levantar TestLink + MariaDB
 docker-compose up -d
 
 # Verificar estado
 docker logs testlink-app
-docker logs testlink-postgres
+docker logs testlink-mariadb
 ```
 
 ## ⚙️ Configuración
