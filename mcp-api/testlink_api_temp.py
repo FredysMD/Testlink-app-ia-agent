@@ -18,6 +18,7 @@ class PromptRequest(BaseModel):
 async def process_testlink_prompt(request: PromptRequest):
     testlink_url = os.getenv("TESTLINK_URL")
     api_key = "d02f9418ca5d547ec29c1fbf7019daa5"
+    api_key = os.getenv("TESTLINK_API_KEY")
     
     return {
         "success": False,

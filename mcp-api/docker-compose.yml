@@ -1,18 +1,18 @@
+version: '3.8'
+
 services:
   mcp-api:
     build: .
     container_name: testlink-mcp-api
     ports:
-      - "8012:8012"
-    environment:
-      - API_HOST=0.0.0.0
-      - API_PORT=8012
-    env_file:
-      - .env
+      - "${API_PORT:-8012}:8012"
+    volumes:
+      - ./.env:/app/.env
     networks:
-      - mcp-network
+      - testlink_net
     restart: unless-stopped
 
 networks:
-  mcp-network:
-    driver: bridge
+  testlink_net:
+    external: true
+    name: testlink_testlink-network
