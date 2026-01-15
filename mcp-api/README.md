@@ -71,6 +71,11 @@ curl -X POST "http://localhost:8012/testlink/prompt" \
 
 ## 🔧 Desarrollo
 
+### Instalación de dependencias
+```bash
+pip install -r requirements.txt
+```
+
 ### Hot reload local
 ```bash
 python dev_server.py

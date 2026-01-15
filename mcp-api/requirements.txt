@@ -1,5 +1,5 @@
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-testlink-api-python-client==0.8.1
-python-dotenv==1.0.0
-pydantic==2.5.0
+fastapi
+uvicorn
+python-dotenv
+TestLink-API-Python-client
+google-generativeai
