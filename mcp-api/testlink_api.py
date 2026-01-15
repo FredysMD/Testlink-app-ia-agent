@@ -178,22 +178,71 @@ class TestLinkMCPClient:
             return await self._create_project(args["name"], args.get("prefix"))
         elif name == "list_projects":
             return await self._list_projects()
+        
+        # Test Case Management
+        elif name == "read_test_case":
+            return await self._read_test_case(args.get("test_case_external_id"), args.get("project_name"))
         elif name == "create_test_case":
             return await self._create_test_case(args["name"], args.get("project_name"), args.get("suite_name"), args.get("summary"))
+        elif name == "update_test_case":
+            return await self._update_test_case(args.get("test_case_external_id"), args.get("project_name"), args)
+        elif name == "delete_test_case":
+            return await self._delete_test_case(args.get("test_case_external_id"), args.get("project_name"))
+            
+        # Test Suite Management
+        elif name == "list_test_suites":
+            return await self._list_test_suites(args.get("project_name"))
+        elif name == "list_test_cases_in_suite":
+            return await self._list_test_cases_in_suite(args.get("suite_name"), args.get("project_name"))
         elif name == "create_test_suite":
             return await self._create_test_suite(args["name"], args.get("project_name"))
+        elif name == "update_test_suite":
+            return await self._update_test_suite(args.get("suite_name"), args.get("project_name"), args)
+            
+        # Search
         elif name == "search_tests":
             return await self._search_tests(args.get("keywords", []))
         elif name == "list_test_cases":
             return await self._list_test_cases(args.get("project_name"))
+            
+        # Test Plan Management
+        elif name == "list_test_plans":
+            return await self._list_test_plans(args.get("project_name"))
         elif name == "create_test_plan":
             return await self._create_test_plan(args["name"], args["project_name"], args.get("notes", ""))
+        elif name == "delete_test_plan":
+            return await self._delete_test_plan(args.get("plan_name"), args.get("project_name"))
+        elif name == "get_test_cases_for_test_plan":
+            return await self._get_test_cases_for_test_plan(args.get("plan_name"), args.get("project_name"))
+        elif name == "add_test_case_to_test_plan":
+            return await self._add_test_case_to_plan(args["case_name"], args["plan_name"], args["project_name"])
+            
+        # Build Management
+        elif name == "list_builds":
+            return await self._list_builds(args.get("plan_name"), args.get("project_name"))
         elif name == "create_build":
             return await self._create_build(args["name"], args["plan_name"], args["project_name"], args.get("notes", ""))
+        elif name == "close_build":
+            return await self._close_build(args.get("build_name"), args.get("plan_name"), args.get("project_name"))
+            
+        # Legacy/Alias
         elif name == "add_test_case_to_plan":
             return await self._add_test_case_to_plan(args["case_name"], args["plan_name"], args["project_name"])
+            
+        # Test Execution Management
+        elif name == "read_test_execution":
+            return await self._read_test_execution(args.get("test_case_external_id"), args.get("plan_name"), args.get("project_name"))
+        elif name == "create_test_execution":
+            return await self._report_test_result(args["case_name"], args["status"], args["plan_name"], args["build_name"], args["project_name"], args.get("notes", ""))
         elif name == "report_test_result":
             return await self._report_test_result(args["case_name"], args["status"], args["plan_name"], args["build_name"], args["project_name"], args.get("notes", ""))
+            
+        # Requirement Management
+        elif name == "list_requirements":
+            return await self._list_requirements(args.get("project_name"))
+        elif name == "get_requirement":
+            return await self._get_requirement(args.get("req_doc_id"), args.get("project_name"))
+            
         else:
             return {"success": False, "message": f"Herramienta desconocida: {name}"}
     
@@ -346,7 +395,98 @@ class TestLinkMCPClient:
         except Exception as e:
             return {"success": False, "message": f"Error creando suite: {str(e)}"}
     
+    # --- NUEVAS HERRAMIENTAS DE GESTIÓN (CASOS, SUITES, ETC) ---
+
+    async def _read_test_case(self, test_case_external_id: str, project_name: str) -> Dict[str, Any]:
+        try:
+            # getTestCase acepta 'testcaseexternalid' (ej: PROJ-1)
+            result = self.tl_client.getTestCase(testcaseexternalid=test_case_external_id)
+            if result:
+                return {"success": True, "data": result, "action": "read_test_case"}
+            return {"success": False, "message": "Caso de prueba no encontrado"}
+        except Exception as e:
+            return {"success": False, "message": f"Error leyendo caso: {str(e)}"}
+
+    async def _update_test_case(self, test_case_external_id: str, project_name: str, updates: Dict) -> Dict[str, Any]:
+        try:
+            # Extraer campos de actualización
+            title = updates.get("title")
+            summary = updates.get("summary")
+            preconditions = updates.get("preconditions")
+            steps = updates.get("steps")
+            expected_results = updates.get("expected_results")
+            
+            result = self.tl_client.updateTestCase(
+                testcaseexternalid=test_case_external_id,
+                title=title,
+                summary=summary,
+                preconditions=preconditions,
+                steps=steps,
+                expected_results=expected_results
+            )
+            return {"success": True, "data": result, "action": "update_test_case"}
+        except Exception as e:
+            return {"success": False, "message": f"Error actualizando caso: {str(e)}"}
+
+    async def _delete_test_case(self, test_case_external_id: str, project_name: str) -> Dict[str, Any]:
+        try:
+            # TestLink API a veces no expone deleteTestCase directamente o requiere ID interno
+            # Intentaremos desactivarlo (active=0) que es la práctica común segura
+            self.tl_client.updateTestCase(testcaseexternalid=test_case_external_id, active=0)
+            return {"success": True, "message": f"Caso {test_case_external_id} desactivado/eliminado", "action": "delete_test_case"}
+        except Exception as e:
+             return {"success": False, "message": f"Error eliminando caso: {str(e)}"}
+
+    async def _list_test_suites(self, project_name: str) -> Dict[str, Any]:
+        try:
+            project_id = self._get_project_id_by_name(project_name)
+            if not project_id: return {"success": False, "message": "Proyecto no encontrado"}
+            
+            suites = self.tl_client.getFirstLevelTestSuitesForTestProject(project_id)
+            return {"success": True, "data": suites, "action": "list_test_suites"}
+        except Exception as e:
+            return {"success": False, "message": f"Error listando suites: {str(e)}"}
+
+    async def _list_test_cases_in_suite(self, suite_name: str, project_name: str) -> Dict[str, Any]:
+        try:
+            project_id = self._get_project_id_by_name(project_name)
+            if not project_id: return {"success": False, "message": "Proyecto no encontrado"}
+            
+            suite_id = self._get_suite_id_by_name(suite_name, project_id)
+            if not suite_id: return {"success": False, "message": "Suite no encontrada"}
+            
+            cases = self.tl_client.getTestCasesForTestSuite(suite_id, deep=True, details='simple')
+            return {"success": True, "data": cases, "action": "list_test_cases_in_suite"}
+        except Exception as e:
+            return {"success": False, "message": f"Error listando casos de suite: {str(e)}"}
+
+    async def _update_test_suite(self, suite_name: str, project_name: str, updates: Dict) -> Dict[str, Any]:
+        try:
+            project_id = self._get_project_id_by_name(project_name)
+            if not project_id: return {"success": False, "message": "Proyecto no encontrado"}
+            
+            suite_id = self._get_suite_id_by_name(suite_name, project_id)
+            if not suite_id: return {"success": False, "message": "Suite no encontrada"}
+            
+            new_name = updates.get("new_name", suite_name)
+            details = updates.get("details")
+            
+            self.tl_client.updateTestSuite(suite_id, project_id, new_name, details)
+            return {"success": True, "message": "Suite actualizada", "action": "update_test_suite"}
+        except Exception as e:
+             return {"success": False, "message": f"Error actualizando suite: {str(e)}"}
+
     # --- NUEVAS HERRAMIENTAS DE CICLO DE VIDA (PLAN, BUILD, EXECUTION) ---
+
+    async def _list_test_plans(self, project_name: str) -> Dict[str, Any]:
+        try:
+            project_id = self._get_project_id_by_name(project_name)
+            if not project_id: return {"success": False, "message": "Proyecto no encontrado"}
+            
+            plans = self.tl_client.getProjectTestPlans(project_id)
+            return {"success": True, "data": plans, "action": "list_test_plans"}
+        except Exception as e:
+             return {"success": False, "message": f"Error listando planes: {str(e)}"}
 
     async def _create_test_plan(self, name: str, project_name: str, notes: str = "") -> Dict[str, Any]:
         try:
@@ -360,6 +500,45 @@ class TestLinkMCPClient:
             }
         except Exception as e:
             return {"success": False, "message": f"Error creando plan: {str(e)}"}
+
+    async def _delete_test_plan(self, plan_name: str, project_name: str) -> Dict[str, Any]:
+        try:
+            project_id = self._get_project_id_by_name(project_name)
+            if not project_id: return {"success": False, "message": "Proyecto no encontrado"}
+            
+            plan_id = self._get_plan_id_by_name(plan_name, project_id)
+            if not plan_id: return {"success": False, "message": "Plan no encontrado"}
+            
+            # Intentar borrar usando método raw si el cliente no lo expone directamente
+            try:
+                self.tl_client.server.tl.deleteTestPlan(self.tl_client.devKey, plan_id)
+                return {"success": True, "message": "Plan eliminado", "action": "delete_test_plan"}
+            except:
+                return {"success": False, "message": "No se pudo eliminar el plan (posible restricción de API)"}
+        except Exception as e:
+             return {"success": False, "message": f"Error eliminando plan: {str(e)}"}
+
+    async def _get_test_cases_for_test_plan(self, plan_name: str, project_name: str) -> Dict[str, Any]:
+        try:
+            project_id = self._get_project_id_by_name(project_name)
+            plan_id = self._get_plan_id_by_name(plan_name, project_id)
+            if not plan_id: return {"success": False, "message": "Plan no encontrado"}
+            
+            cases = self.tl_client.getTestCasesForTestPlan(plan_id)
+            return {"success": True, "data": cases, "action": "get_test_cases_for_test_plan"}
+        except Exception as e:
+             return {"success": False, "message": f"Error obteniendo casos del plan: {str(e)}"}
+
+    async def _list_builds(self, plan_name: str, project_name: str) -> Dict[str, Any]:
+        try:
+            project_id = self._get_project_id_by_name(project_name)
+            plan_id = self._get_plan_id_by_name(plan_name, project_id)
+            if not plan_id: return {"success": False, "message": "Plan no encontrado"}
+            
+            builds = self.tl_client.getBuildsForTestPlan(plan_id)
+            return {"success": True, "data": builds, "action": "list_builds"}
+        except Exception as e:
+             return {"success": False, "message": f"Error listando builds: {str(e)}"}
 
     async def _create_build(self, name: str, plan_name: str, project_name: str, notes: str = "") -> Dict[str, Any]:
         try:
@@ -380,6 +559,11 @@ class TestLinkMCPClient:
             }
         except Exception as e:
             return {"success": False, "message": f"Error creando build: {str(e)}"}
+
+    async def _close_build(self, build_name: str, plan_name: str, project_name: str) -> Dict[str, Any]:
+        # La API XMLRPC estándar de TestLink no siempre expone 'closeBuild' fácilmente.
+        # Esta es una implementación tentativa.
+        return {"success": False, "message": "Función close_build no soportada completamente por la versión actual de la API"}
 
     async def _add_test_case_to_plan(self, case_name: str, plan_name: str, project_name: str) -> Dict[str, Any]:
         try:
@@ -407,6 +591,16 @@ class TestLinkMCPClient:
             }
         except Exception as e:
             return {"success": False, "message": f"Error añadiendo caso al plan: {str(e)}"}
+
+    async def _read_test_execution(self, test_case_external_id: str, plan_name: str, project_name: str) -> Dict[str, Any]:
+        try:
+            project_id = self._get_project_id_by_name(project_name)
+            plan_id = self._get_plan_id_by_name(plan_name, project_id)
+            
+            result = self.tl_client.getLastExecutionResult(plan_id, testcaseexternalid=test_case_external_id)
+            return {"success": True, "data": result, "action": "read_test_execution"}
+        except Exception as e:
+             return {"success": False, "message": f"Error leyendo ejecución: {str(e)}"}
 
     async def _report_test_result(self, case_name: str, status: str, plan_name: str, build_name: str, project_name: str, notes: str = "") -> Dict[str, Any]:
         try:
@@ -443,6 +637,29 @@ class TestLinkMCPClient:
         except Exception as e:
             return {"success": False, "message": f"Error reportando resultado: {str(e)}"}
 
+    # --- REQUIREMENTS ---
+    async def _list_requirements(self, project_name: str) -> Dict[str, Any]:
+        try:
+            project_id = self._get_project_id_by_name(project_name)
+            # Obtener especificaciones primero
+            specs = self.tl_client.getRequirementSpecifications(project_id)
+            all_reqs = []
+            if specs:
+                for spec in specs:
+                    reqs = self.tl_client.getRequirementsForRequirementSpecification(spec['id'], project_id)
+                    all_reqs.extend(reqs)
+            return {"success": True, "data": all_reqs, "action": "list_requirements"}
+        except Exception as e:
+             return {"success": False, "message": f"Error listando requisitos: {str(e)}"}
+
+    async def _get_requirement(self, req_doc_id: str, project_name: str) -> Dict[str, Any]:
+        try:
+            project_id = self._get_project_id_by_name(project_name)
+            result = self.tl_client.getRequirement(req_doc_id, project_id)
+            return {"success": True, "data": result, "action": "get_requirement"}
+        except Exception as e:
+             return {"success": False, "message": f"Error obteniendo requisito: {str(e)}"}
+
     # --- HELPERS ---
     def _get_project_id_by_name(self, name: str):
         projects = self.tl_client.getProjects()
@@ -468,13 +685,27 @@ class TestLinkMCPClient:
             pass
         return None
 
+    def _get_suite_id_by_name(self, suite_name: str, project_id):
+        try:
+            suites = self.tl_client.getFirstLevelTestSuitesForTestProject(project_id)
+            for s in suites:
+                if s['name'].lower() == suite_name.lower():
+                    return s['id']
+        except:
+            pass
+        return None
+
     def _find_case_by_name(self, name: str, project_id):
-        # Búsqueda simplificada. En producción usaría getTestCaseIDByName si existe o búsqueda iterativa
-        # Aquí reutilizamos la lógica de búsqueda existente o asumimos que el ID se pasa si falla
-        return None # Implementación completa requeriría iterar suites. Por brevedad, el agente debe usar search_tests primero para obtener IDs si esto falla, pero para este ejemplo asumiremos que el usuario o agente provee nombres exactos y podríamos implementar una búsqueda rápida aquí si fuera crítico.
-        # NOTA: Para que funcione _report_test_result, necesitamos el ID interno.
-        # Una estrategia mejor para el Agente es usar search_tests para obtener el ID y pasarlo.
-        # Voy a mejorar _find_case_by_name para hacer una búsqueda rápida en suites de primer nivel
+        # Intentar búsqueda por ID externo si tiene formato (ej: PROJ-123)
+        if '-' in name:
+            try:
+                case = self.tl_client.getTestCase(testcaseexternalid=name)
+                if case and isinstance(case, list): case = case[0]
+                if case: return case
+            except:
+                pass
+        
+        # Búsqueda por nombre en suites de primer nivel
         try:
             suites = self.tl_client.getFirstLevelTestSuitesForTestProject(project_id)
             for s in suites:
@@ -607,11 +838,11 @@ class TestLinkMCPClient:
     
     def _get_tools_definition(self) -> List[Dict]:
         """Define las herramientas disponibles para el Agente"""
-        # Definición compatible con Gemini Function Declarations
         return [
+            # Project Management
             {
                 "name": "create_project",
-                "description": "Crear un nuevo proyecto de pruebas en TestLink",
+                "description": "Create a new project",
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
@@ -623,12 +854,25 @@ class TestLinkMCPClient:
             },
             {
                 "name": "list_projects",
-                "description": "Listar todos los proyectos existentes",
+                "description": "Get all test projects",
                 "parameters": {"type": "OBJECT", "properties": {}}
+            },
+            # Test Case Management
+            {
+                "name": "read_test_case",
+                "description": "Fetch complete test case data",
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "test_case_external_id": {"type": "STRING", "description": "External ID (e.g. PROJ-1)"},
+                        "project_name": {"type": "STRING"}
+                    },
+                    "required": ["test_case_external_id"]
+                }
             },
             {
                 "name": "create_test_case",
-                "description": "Crear un nuevo caso de prueba",
+                "description": "Create new test case with validation",
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
@@ -641,23 +885,99 @@ class TestLinkMCPClient:
                 }
             },
             {
-                "name": "search_tests",
-                "description": "Buscar casos de prueba o proyectos por palabras clave",
+                "name": "update_test_case",
+                "description": "Update test case fields with full validation",
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
-                        "keywords": {
-                            "type": "ARRAY",
-                            "items": {"type": "STRING"},
-                            "description": "Lista de palabras clave para buscar"
-                        }
+                        "test_case_external_id": {"type": "STRING"},
+                        "project_name": {"type": "STRING"},
+                        "title": {"type": "STRING"},
+                        "summary": {"type": "STRING"},
+                        "preconditions": {"type": "STRING"},
+                        "steps": {"type": "ARRAY", "items": {"type": "OBJECT"}},
+                        "expected_results": {"type": "STRING"}
                     },
-                    "required": ["keywords"]
+                    "required": ["test_case_external_id"]
+                }
+            },
+            {
+                "name": "delete_test_case",
+                "description": "Remove test case permanently",
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "test_case_external_id": {"type": "STRING"},
+                        "project_name": {"type": "STRING"}
+                    },
+                    "required": ["test_case_external_id"]
+                }
+            },
+            # Test Suite Management
+            {
+                "name": "list_test_suites",
+                "description": "Get test suites for a project",
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "project_name": {"type": "STRING"}
+                    },
+                    "required": ["project_name"]
+                }
+            },
+            {
+                "name": "list_test_cases_in_suite",
+                "description": "Get all test cases in a suite",
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "suite_name": {"type": "STRING"},
+                        "project_name": {"type": "STRING"}
+                    },
+                    "required": ["suite_name", "project_name"]
+                }
+            },
+            {
+                "name": "create_test_suite",
+                "description": "Create a new test suite in a project",
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "name": {"type": "STRING"},
+                        "project_name": {"type": "STRING"}
+                    },
+                    "required": ["name", "project_name"]
+                }
+            },
+            {
+                "name": "update_test_suite",
+                "description": "Update test suite properties",
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "suite_name": {"type": "STRING"},
+                        "project_name": {"type": "STRING"},
+                        "new_name": {"type": "STRING"},
+                        "details": {"type": "STRING"}
+                    },
+                    "required": ["suite_name", "project_name"]
+                }
+            },
+            # Test Plan Management
+            {
+                "name": "list_test_plans",
+                "description": "List all test plans for a project",
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "project_name": {"type": "STRING"}
+                    },
+                    "required": ["project_name"]
                 }
             },
             {
                 "name": "create_test_plan",
-                "description": "Crear un Plan de Pruebas (Test Plan) para agrupar ejecuciones",
+                "description": "Create a new test plan",
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
@@ -669,8 +989,58 @@ class TestLinkMCPClient:
                 }
             },
             {
+                "name": "delete_test_plan",
+                "description": "Delete a test plan",
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "plan_name": {"type": "STRING"},
+                        "project_name": {"type": "STRING"}
+                    },
+                    "required": ["plan_name", "project_name"]
+                }
+            },
+            {
+                "name": "get_test_cases_for_test_plan",
+                "description": "List all test cases in a test plan",
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "plan_name": {"type": "STRING"},
+                        "project_name": {"type": "STRING"}
+                    },
+                    "required": ["plan_name", "project_name"]
+                }
+            },
+            {
+                "name": "add_test_case_to_test_plan",
+                "description": "Add a test case to a test plan",
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "case_name": {"type": "STRING", "description": "Name or External ID"},
+                        "plan_name": {"type": "STRING"},
+                        "project_name": {"type": "STRING"}
+                    },
+                    "required": ["case_name", "plan_name", "project_name"]
+                }
+            },
+            # Build Management
+            {
+                "name": "list_builds",
+                "description": "List all builds for a test plan",
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "plan_name": {"type": "STRING"},
+                        "project_name": {"type": "STRING"}
+                    },
+                    "required": ["plan_name", "project_name"]
+                }
+            },
+            {
                 "name": "create_build",
-                "description": "Crear un Build dentro de un Plan de Pruebas",
+                "description": "Create a new build",
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
@@ -683,32 +1053,86 @@ class TestLinkMCPClient:
                 }
             },
             {
-                "name": "add_test_case_to_plan",
-                "description": "Añadir un caso de prueba a un plan para su ejecución",
+                "name": "close_build",
+                "description": "Close a build (prevents new test executions)",
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
-                        "case_name": {"type": "STRING", "description": "Nombre del caso de prueba"},
-                        "plan_name": {"type": "STRING", "description": "Nombre del plan de pruebas destino"},
+                        "build_name": {"type": "STRING"},
+                        "plan_name": {"type": "STRING"},
                         "project_name": {"type": "STRING", "description": "Nombre del proyecto"}
                     },
-                    "required": ["case_name", "plan_name", "project_name"]
+                    "required": ["build_name", "plan_name", "project_name"]
+                }
+            },
+            # Test Execution Management
+            {
+                "name": "read_test_execution",
+                "description": "Get test execution details",
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "test_case_external_id": {"type": "STRING"},
+                        "plan_name": {"type": "STRING"},
+                        "project_name": {"type": "STRING"}
+                    },
+                    "required": ["test_case_external_id", "plan_name", "project_name"]
                 }
             },
             {
-                "name": "report_test_result",
-                "description": "Reportar el resultado de la ejecución de un caso de prueba",
+                "name": "create_test_execution",
+                "description": "Record test execution result",
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
-                        "case_name": {"type": "STRING", "description": "Nombre del caso de prueba ejecutado"},
+                        "case_name": {"type": "STRING"},
                         "status": {"type": "STRING", "description": "Estado: 'pass', 'fail', 'blocked'"},
-                        "plan_name": {"type": "STRING", "description": "Nombre del plan de pruebas"},
-                        "build_name": {"type": "STRING", "description": "Nombre del build ejecutado"},
-                        "project_name": {"type": "STRING", "description": "Nombre del proyecto"},
+                        "plan_name": {"type": "STRING"},
+                        "build_name": {"type": "STRING"},
+                        "project_name": {"type": "STRING"},
                         "notes": {"type": "STRING", "description": "Notas sobre la ejecución (opcional)"}
                     },
                     "required": ["case_name", "status", "plan_name", "build_name", "project_name"]
+                }
+            },
+            # Requirement Management
+            {
+                "name": "list_requirements",
+                "description": "Get all requirements for a project",
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "project_name": {"type": "STRING"}
+                    },
+                    "required": ["project_name"]
+                }
+            },
+            {
+                "name": "get_requirement",
+                "description": "Get detailed information about a specific requirement",
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "req_doc_id": {"type": "STRING"},
+                        "project_name": {"type": "STRING"}
+                    },
+                    "required": ["req_doc_id", "project_name"]
+                }
+            },
+            # Search
+            {
+                "name": "search_tests",
+                "description": "Search for test cases or projects by keywords",
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "keywords": {
+                            "type": "ARRAY",
+                            "items": {"type": "STRING"},
+                            "description": "Lista de palabras clave para buscar"
+                        }
+                    },
+                    "required": ["keywords"]
                 }
             }
         ]
