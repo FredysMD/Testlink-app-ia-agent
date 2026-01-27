@@ -6,6 +6,8 @@ up:
 	cd testlink && docker-compose up -d
 	@echo "⏳ Esperando inicialización de base de datos..."
 	@sleep 5
+	@echo "⚙️ Ejecutando configuración automática y correcciones..."
+	@chmod +x setup-testlink.sh && ./setup-testlink.sh
 	@echo "🚀 Construyendo e iniciando MCP API..."
 	cd mcp-api && docker build -t testlink-mcp-api .
 	-docker rm -f testlink-mcp-api 2>/dev/null
