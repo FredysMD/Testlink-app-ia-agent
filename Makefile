@@ -1,4 +1,4 @@
-.PHONY: up down logs setup dev-api clean restart
+.PHONY: up down logs setup dev-api clean restart reset
 
 # Levantar todo el entorno (TestLink + API)
 up:
@@ -46,3 +46,10 @@ clean:
 	@echo "✅ Limpieza completa."
 
 restart: clean up
+
+reset: clean
+	@echo "🧹 Eliminando configuración residual local..."
+	-rm -f testlink/config_db.inc.php
+	@echo "🔄 Reconstruyendo imágenes sin caché (para corregir configuración)..."
+	cd testlink && docker-compose build --no-cache
+	$(MAKE) up
