@@ -1,13 +1,14 @@
 # TestLink + MCP API Integration
 
-Sistema completo de TestLink con API MCP para procesamiento de lenguaje natural.
+Sistema completo de TestLink con API MCP para procesamiento de lenguaje natural, orquestado para facilitar el desarrollo y despliegue.
 
 ## 🚀 Inicio Rápido
 
-### 1. Levantar TestLink con PostgreSQL
+### 1. Levantar todo el entorno
+El proyecto incluye un `Makefile` para simplificar la gestión de contenedores.
+
 ```bash
-cd testlink
-docker-compose up -d
+make up
 ```
 
 ### 2. Levantar MCP API

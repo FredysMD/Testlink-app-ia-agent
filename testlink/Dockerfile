@@ -7,4 +7,4 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Restart PHP-FPM to load the extension
-RUN service php7.0-fpm restart || true
+# (Service restart removed as it is ineffective during build time)

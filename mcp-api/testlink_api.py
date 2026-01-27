@@ -8,6 +8,7 @@ import testlink
 import traceback
 import os
 from dotenv import load_dotenv
+import logging
 
 # Intentar importar Google Generative AI
 try:
@@ -18,6 +19,13 @@ except ImportError:
 
 # Cargar variables de entorno
 load_dotenv()
+
+# Configuración de Logging
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
+logger = logging.getLogger("testlink-mcp")
 
 app = FastAPI(
     title=os.getenv("API_TITLE", "TestLink MCP API"),
@@ -39,35 +47,36 @@ class TestLinkMCPClient:
         self.model = None
         if genai and os.getenv("GOOGLE_API_KEY"):
             genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
-            self.model = genai.GenerativeModel('gemini-2.5-flash')
+            model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+            self.model = genai.GenerativeModel(model_name)
+            logger.info(f"Modelo Gemini inicializado: {model_name}")
         
     async def connect(self, url: str, api_key: str) -> bool:
         try:
-            print(f"Attempting to connect to TestLink at: {url}")
-            print(f"Using API key: {api_key[:10]}...")
+            logger.info(f"Intentando conectar a TestLink en: {url}")
+            logger.debug(f"Usando API key: {api_key[:5]}...{api_key[-5:] if len(api_key)>10 else ''}")
             self.tl_client = testlink.TestlinkAPIClient(url, api_key)
             # Test connection with a simple call
             try:
                 about_info = self.tl_client.about()
-                print(f"Successfully connected to TestLink: {about_info}")
+                logger.info(f"Conexión exitosa a TestLink: {about_info}")
                 return True
             except Exception as api_error:
-                print(f"API call failed: {api_error}")
+                logger.error(f"Fallo en llamada API inicial: {api_error}")
                 # If about() fails, it might be an API key issue
                 # Let's try to at least verify the server is reachable
                 import urllib.request
                 try:
                     response = urllib.request.urlopen(url.replace('/lib/api/xmlrpc/v1/xmlrpc.php', '/login.php'))
                     if response.getcode() == 200:
-                        print("TestLink server is reachable but API key might be invalid")
+                        logger.warning("Servidor TestLink accesible, pero la API Key podría ser inválida")
                         return False
                 except:
-                    print("TestLink server is not reachable")
+                    logger.error("Servidor TestLink no es accesible")
                     return False
                 return False
         except Exception as e:
-            print(f"Connection error: {e}")
-            print(f"Error type: {type(e)}")
+            logger.error(f"Error de conexión: {e}", exc_info=True)
             return False
     
     async def process_prompt(self, prompt: str) -> Dict[str, Any]:
@@ -126,7 +135,7 @@ class TestLinkMCPClient:
                 function_name = fc.name
                 arguments = dict(fc.args)
                 
-                print(f"Agent executing tool: {function_name} with args: {arguments}")
+                logger.info(f"Agente ejecutando herramienta: {function_name} con args: {arguments}")
                 return await self._execute_tool(function_name, arguments)
             else:
                 # Respuesta conversacional
@@ -137,7 +146,7 @@ class TestLinkMCPClient:
                 }
                 
         except Exception as e:
-            print(f"Agent Error: {traceback.format_exc()}")
+            logger.error(f"Error del Agente: {str(e)}", exc_info=True)
             return {
                 "success": False,
                 "message": f"Error del Agente: {str(e)}"
@@ -169,7 +178,7 @@ class TestLinkMCPClient:
                     
                     context["projects"].append(proj_info)
         except Exception as e:
-            print(f"RAG Warning: {e}")
+            logger.warning(f"Advertencia RAG (recuperación de contexto): {e}")
         return context
     
     async def _execute_tool(self, name: str, args: Dict) -> Dict:
@@ -202,8 +211,6 @@ class TestLinkMCPClient:
         # Search
         elif name == "search_tests":
             return await self._search_tests(args.get("keywords", []))
-        elif name == "list_test_cases":
-            return await self._list_test_cases(args.get("project_name"))
             
         # Test Plan Management
         elif name == "list_test_plans":
@@ -225,16 +232,10 @@ class TestLinkMCPClient:
         elif name == "close_build":
             return await self._close_build(args.get("build_name"), args.get("plan_name"), args.get("project_name"))
             
-        # Legacy/Alias
-        elif name == "add_test_case_to_plan":
-            return await self._add_test_case_to_plan(args["case_name"], args["plan_name"], args["project_name"])
-            
         # Test Execution Management
         elif name == "read_test_execution":
             return await self._read_test_execution(args.get("test_case_external_id"), args.get("plan_name"), args.get("project_name"))
         elif name == "create_test_execution":
-            return await self._report_test_result(args["case_name"], args["status"], args["plan_name"], args["build_name"], args["project_name"], args.get("notes", ""))
-        elif name == "report_test_result":
             return await self._report_test_result(args["case_name"], args["status"], args["plan_name"], args["build_name"], args["project_name"], args.get("notes", ""))
             
         # Requirement Management
@@ -1146,6 +1147,9 @@ async def process_testlink_prompt(request: PromptRequest):
     Procesa un prompt en lenguaje natural y ejecuta acciones en TestLink
     """
     try:
+        # Recargar configuración para detectar cambios en .env sin reiniciar
+        load_dotenv(override=True)
+
         # Usar configuración de variables de entorno
         testlink_url = os.getenv("TESTLINK_URL")
         api_key = os.getenv("TESTLINK_API_KEY")
@@ -1155,7 +1159,7 @@ async def process_testlink_prompt(request: PromptRequest):
         # Conectar a TestLink
         connected = await mcp_client.connect(testlink_url, api_key)
         if not connected:
-            print(f"Failed to connect to TestLink at {testlink_url}")
+            logger.error(f"Fallo al conectar con TestLink en {testlink_url}")
             raise HTTPException(status_code=500, detail=f"No se pudo conectar a TestLink en {testlink_url}")
         
         # Procesar prompt
@@ -1168,8 +1172,7 @@ async def process_testlink_prompt(request: PromptRequest):
             "data": result.get("data")
         }
     except Exception as e:
-        print(f"Error en endpoint: {e}")
-        print(traceback.format_exc())
+        logger.error(f"Error crítico en endpoint: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
 
 @app.get("/testlink/health")
