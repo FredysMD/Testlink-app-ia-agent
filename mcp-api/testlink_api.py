@@ -90,14 +90,15 @@ class TestLinkMCPClient:
             {json.dumps(context, indent=2)}
             
             INSTRUCCIONES:
-            1. ANÁLISIS: Entiende qué dato busca el usuario.
-            2. HERRAMIENTAS: Usa las herramientas disponibles para responder.
-            3. INTERPRETACIÓN: Tras recibir datos de una herramienta, explícalos en español profesional y natural.
-               - NO devuelvas JSON crudo al usuario final.
-               - Si obtienes una lista, preséntala de forma ordenada (ej. viñetas o tabla).
-               - Si obtienes detalles de un caso, resume la información más relevante (ID, Nombre, Resumen).
-               - Si la herramienta indica error o "no encontrado", comunícalo amablemente.
-            4. FORMATO: Usa Markdown para estructurar la respuesta (negritas, listas, tablas si aplica).
+            1. **CAPACIDADES**:
+               - PUEDES buscar globalmente (`search_tests`).
+               - PUEDES listar casos de una suite específica (`list_test_cases_in_suite`).
+            2. **BÚSQUEDA**: Si el usuario pide buscar por palabras clave, usa `search_tests`.
+            3. **SUITES**: Si el usuario pide "ver casos de la suite X", USA `list_test_cases_in_suite`.
+               - ¡No digas que no puedes! La herramienta existe.
+            4. **FORMATO**:
+               - Si el usuario pide una TABLA, genera una tabla Markdown usando los datos del JSON de respuesta.
+               - `search_tests` y `list_test_cases_in_suite` devuelven los datos necesarios (ID, Nombre, Suite).
             """
             
             # Configurar chat con herramientas
@@ -186,8 +187,12 @@ class TestLinkMCPClient:
             return await self._list_builds(args.get("plan_name"), args.get("project_name"))
         elif name == "read_test_execution":
             return await self._read_test_execution(args.get("test_case_external_id"), args.get("plan_name"), args.get("project_name"))
+        elif name == "list_test_cases_in_suite":
+            return await self._list_test_cases_in_suite(args.get("suite_name"), args.get("project_name"))
         elif name == "list_requirements":
             return await self._list_requirements(args.get("project_name"))
+        elif name == "search_tests":
+            return await self._search_tests(args.get("keyword"), args.get("project_name"))
         else:
             return {"success": False, "message": f"Acción desconocida: {name}"}
     
@@ -254,15 +259,87 @@ class TestLinkMCPClient:
         except Exception as e:
              return {"success": False, "message": f"Error leyendo ejecución: {str(e)}"}
 
+    async def _list_test_cases_in_suite(self, suite_name: str, project_name: str) -> Dict[str, Any]:
+        try:
+            logger.info(f'suite_name: {suite_name}')
+            logger.info(f'project_name: {project_name}')
+
+            project_id = self._get_project_id_by_name(project_name)
+            if not project_id: 
+                return {"success": False, "message": "Proyecto no encontrado"}
+            
+            suite_id = self._get_suite_id_by_name(suite_name, project_id)
+            if not suite_id: 
+                return {"success": False, "message": "Suite no encontrada"}
+            
+            cases = self.tl_client.getTestCasesForTestSuite(suite_id, True, 'simple')
+            return {
+                "success": True, 
+                "data": cases, 
+                "message": f"Se encontraron {len(cases) if isinstance(cases, list) else 0} casos en la suite"
+            }
+        except Exception as e:
+            logger.info(f'_list_test_cases_in_suite: {str(e)}')
+            return {"success": False, "message": f"Error listando casos de suite: {str(e)}"}
+
+    async def _search_tests(self, keyword: str, project_name: str = None) -> Dict[str, Any]:
+        try:
+            all_cases = []
+            projects = self.tl_client.getProjects()
+            
+            # Si se especifica un proyecto, buscar solo en ese proyecto
+            if project_name:
+                projects = [p for p in projects if p['name'].lower() == project_name.lower()]
+                if not projects:
+                    return {"success": False, "message": "Proyecto no encontrado"}
+            
+            for project in projects:
+                try:
+                    # Obtener todas las suites del proyecto
+                    suites = self.tl_client.getFirstLevelTestSuitesForTestProject(project['id'])
+                    if not suites:
+                        continue
+                        
+                    for suite in suites:
+                        try:
+                            # Obtener casos de cada suite
+                            cases = self.tl_client.getTestCasesForTestSuite(suite['id'], True, 'full')
+                            if cases:
+                                for case in cases:
+                                    # Buscar keyword en nombre, resumen o pasos
+                                    case_text = f"{case.get('name', '')} {case.get('summary', '')} {case.get('steps', '')}".lower()
+                                    if keyword.lower() in case_text:
+                                        case['project_name'] = project['name']
+                                        case['suite_name'] = suite['name']
+                                        all_cases.append(case)
+                        except Exception as e:
+                            logger.warning(f"Error procesando suite {suite.get('name', 'unknown')}: {e}")
+                            continue
+                except Exception as e:
+                    logger.warning(f"Error procesando proyecto {project.get('name', 'unknown')}: {e}")
+                    continue
+            
+            return {
+                "success": True,
+                "data": all_cases,
+                "message": f"Se encontraron {len(all_cases)} casos que contienen '{keyword}'"
+            }
+        except Exception as e:
+            return {"success": False, "message": f"Error buscando casos: {str(e)}"}
+
     async def _list_requirements(self, project_name: str) -> Dict[str, Any]:
         try:
             project_id = self._get_project_id_by_name(project_name)
+            if not project_id:
+                return {"success": False, "message": "Proyecto no encontrado"}
+            
             specs = self.tl_client.getRequirementSpecifications(project_id)
             all_reqs = []
             if specs:
                 for spec in specs:
                     reqs = self.tl_client.getRequirementsForRequirementSpecification(spec['id'], project_id)
-                    all_reqs.extend(reqs)
+                    if reqs:
+                        all_reqs.extend(reqs)
             return {"success": True, "data": all_reqs, "message": f"Se encontraron {len(all_reqs)} requisitos"}
         except Exception as e:
              return {"success": False, "message": f"Error listando requisitos: {str(e)}"}
@@ -275,12 +352,21 @@ class TestLinkMCPClient:
                 return p['id']
         return None
 
-    def _get_plan_id_by_name(self, name: str, project_id):
+    def _get_plan_id_by_name(self, plan_name: str, project_id):
         try:
             plans = self.tl_client.getProjectTestPlans(project_id)
             for p in plans:
-                if p['name'].lower() == name.lower():
+                if p['name'].lower() == plan_name.lower():
                     return p['id']
+        except: pass
+        return None
+
+    def _get_suite_id_by_name(self, suite_name: str, project_id):
+        try:
+            suites = self.tl_client.getFirstLevelTestSuitesForTestProject(project_id)
+            for s in suites:
+                if s['name'].lower() == suite_name.lower():
+                    return s['id']
         except: pass
         return None
 
@@ -347,12 +433,36 @@ class TestLinkMCPClient:
                 }
             },
             {
+                "name": "list_test_cases_in_suite",
+                "description": "Get all test cases in a specific test suite",
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "suite_name": {"type": "STRING"},
+                        "project_name": {"type": "STRING"}
+                    },
+                    "required": ["suite_name", "project_name"]
+                }
+            },
+            {
                 "name": "list_requirements",
                 "description": "Get all requirements for a project",
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {"project_name": {"type": "STRING"}},
                     "required": ["project_name"]
+                }
+            },
+            {
+                "name": "search_tests",
+                "description": "Search test cases by keyword in name, summary or steps",
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "keyword": {"type": "STRING", "description": "Keyword to search for"},
+                        "project_name": {"type": "STRING", "description": "Optional: limit search to specific project"}
+                    },
+                    "required": ["keyword"]
                 }
             }
         ]
