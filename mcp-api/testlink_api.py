@@ -98,7 +98,7 @@ class TestLinkMCPClient:
                - ¡No digas que no puedes! La herramienta existe.
             4. **FORMATO**:
                - Si el usuario pide una TABLA, genera una tabla Markdown usando los datos del JSON de respuesta.
-               - `search_tests` y `list_test_cases_in_suite` devuelven los datos necesarios (ID, Nombre, Suite).
+               - `search_tests` y `list_test_cases_in_suite` devuelven los datos necesarios seperados por comas.
             """
             
             # Configurar chat con herramientas
@@ -179,6 +179,8 @@ class TestLinkMCPClient:
             return await self._list_projects()
         elif name == "read_test_case":
             return await self._read_test_case(args.get("test_case_external_id"), args.get("project_name"))
+        elif name == "get_test_case_details":
+            return await self._get_test_case_details(args.get("test_case_external_id"), args.get("project_name"))
         elif name == "list_test_suites":
             return await self._list_test_suites(args.get("project_name"))
         elif name == "list_test_plans":
@@ -217,6 +219,33 @@ class TestLinkMCPClient:
             return {"success": False, "message": "Caso de prueba no encontrado"}
         except Exception as e:
             return {"success": False, "message": f"Error leyendo caso: {str(e)}"}
+
+    async def _get_test_case_details(self, test_case_external_id: str, project_name: str = None) -> Dict[str, Any]:
+        try:
+            # getTestCase suele devolver una lista de diccionarios
+            result = self.tl_client.getTestCase(testcaseexternalid=test_case_external_id)
+            
+            if not result:
+                return {"success": False, "message": "Caso de prueba no encontrado"}
+            
+            # Tomamos el primer elemento (versión activa/reciente)
+            tc = result[0] if isinstance(result, list) and result else result
+            
+            if not isinstance(tc, dict):
+                return {"success": False, "message": "Formato de respuesta inesperado de TestLink"}
+
+            details = {
+                "external_id": tc.get("full_tc_external_id", test_case_external_id),
+                "name": tc.get("name"),
+                "summary": tc.get("summary", "Sin resumen"),
+                "preconditions": tc.get("preconditions", "Sin precondiciones"),
+                "steps": tc.get("steps", []),
+                "author": tc.get("author_login", "Desconocido"),
+                "creation_ts": tc.get("creation_ts", "")
+            }
+            return {"success": True, "data": details, "message": f"Detalles recuperados para {test_case_external_id}"}
+        except Exception as e:
+            return {"success": False, "message": f"Error obteniendo detalles del caso: {str(e)}"}
 
     async def _list_test_suites(self, project_name: str) -> Dict[str, Any]:
         try:
@@ -272,11 +301,27 @@ class TestLinkMCPClient:
             if not suite_id: 
                 return {"success": False, "message": "Suite no encontrada"}
             
-            cases = self.tl_client.getTestCasesForTestSuite(suite_id, True, 'simple')
+            # Usamos 'full' para obtener el autor (author_login)
+            cases = self.tl_client.getTestCasesForTestSuite(suite_id, True, 'full')
+            
+            processed_cases = []
+            # Manejar si devuelve dict o list
+            iterator = cases.values() if isinstance(cases, dict) else cases
+            
+            if iterator:
+                for c in iterator:
+                    if isinstance(c, dict):
+                        processed_cases.append({
+                            "external_id": c.get('full_tc_external_id', c.get('id')),
+                            "name": c.get('name'),
+                            "author": c.get('author_login', 'Desconocido'),
+                            "summary": c.get('summary', '')[:200]
+                        })
+            
             return {
                 "success": True, 
-                "data": cases, 
-                "message": f"Se encontraron {len(cases) if isinstance(cases, list) else 0} casos en la suite"
+                "data": processed_cases, 
+                "message": f"Se encontraron {len(processed_cases)} casos en la suite"
             }
         except Exception as e:
             logger.info(f'_list_test_cases_in_suite: {str(e)}')
@@ -380,6 +425,18 @@ class TestLinkMCPClient:
             {
                 "name": "read_test_case",
                 "description": "Fetch complete test case data",
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "test_case_external_id": {"type": "STRING", "description": "External ID (e.g. PROJ-1)"},
+                        "project_name": {"type": "STRING"}
+                    },
+                    "required": ["test_case_external_id"]
+                }
+            },
+            {
+                "name": "get_test_case_details",
+                "description": "Get detailed info (summary, preconditions, steps) of a test case",
                 "parameters": {
                     "type": "OBJECT",
                     "properties": {
